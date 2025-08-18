@@ -10,11 +10,10 @@ func main() {
 	e.Use(middleware.Logger())
 	e.Use(middleware.CORS())
 
-	// WebSocket endpoint
 	e.GET("/ws", wsHandler)
 
-	// Start message broadcasting
 	go handleMessages()
+	go generateDummyData()
 
 	e.Logger.Fatal(e.Start(":8080"))
 }

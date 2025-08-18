@@ -25,6 +25,9 @@
 
   function drawGraph() {
     if (!data.length) return;
+
+    console.log("[ drawing graph... ]")
+
     const svg = d3.select("svg");
     svg.selectAll('*').remove();
     const width = 600, height = 400;
