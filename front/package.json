@@ -15,6 +15,8 @@
   },
   "dependencies": {
     "d3": "^7.9.0",
-    "leaflet": "^1.9.4"
+    "leaflet": "^1.9.4",
+    "regl": "^2.1.1",
+    "webgl-plot": "^0.7.2"
   }
 }
