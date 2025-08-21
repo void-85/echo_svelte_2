@@ -52,7 +52,7 @@ func handleMessages() {
 }
 
 func generateDummyData() {
-	ticker := time.NewTicker(20 * time.Millisecond)
+	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
 	shift := 0.0
@@ -61,9 +61,11 @@ func generateDummyData() {
 		shift += 0.02
 
 		// Graph data: 50 random points
-		graphData := make([]float64, 1000)
+		graphData := make([]float64, 100)
 		for i := range graphData {
-			graphData[i] = rand.Float64()*2 + 15*math.Sin(float64(i)/80+shift)
+			graphData[i] = rand.Float64()*3 +
+				15*math.Sin(float64(i)/10+shift) +
+				15*math.Cos(float64(i)/12+shift*1.5)
 		}
 		broadcast <- Msg{Type: "graph", Data: graphData}
 
