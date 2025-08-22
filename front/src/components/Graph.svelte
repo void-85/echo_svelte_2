@@ -82,7 +82,7 @@
     vec3 heat(float t){return mix(vec3(0.0,0.0,1.0),vec3(0.0,1.0,0.0),t);}
     void main(){
       float t = clamp((vVal-uMin)/(uMax-uMin),0.0,1.0);
-      t = pow(t, 2.5);
+      t = pow(t, 3.5);
       gl_FragColor = vec4(heat(t),1.0);
     }`;
 

@@ -58,29 +58,47 @@ func generateDummyData() {
 	shift := 0.0
 	for range ticker.C {
 
-		shift += 0.02
+		shift += rand.Float64()*0.2 - 0.05
+
+		min, max := 1000.0, -1000.0
+		val := 0.0
 
 		// Graph data: 50 random points
 		graphData := make([]float64, 100)
 		for i := range graphData {
-			graphData[i] = rand.Float64()*3 +
+
+			val = rand.Float64()*3 +
 				15*math.Sin(float64(i)/10+shift) +
-				15*math.Cos(float64(i)/12+shift*1.5)
+				15*math.Cos(float64(i)/12+shift*1.5) + 30
+
+			if val < min {
+				min = val
+			}
+			if val > max {
+				max = val
+			}
+
+			graphData[i] = val
+
 		}
 		broadcast <- Msg{Type: "graph", Data: graphData}
 
-		// Spectrum data: 20 random amplitudes
-		spectrumData := make([]float64, 20)
-		for i := range spectrumData {
-			spectrumData[i] = rand.Float64() * 50
-		}
-		broadcast <- Msg{Type: "spectrum", Data: spectrumData}
+		//fmt.Printf(" -[ %.3f <--> %.3f ]- \n", min, max)
 
-		// Map data: random GPS point
-		mapData := map[string]float64{
-			"lat": 37.7749 + (rand.Float64()-0.5)*0.1, // SF area ±0.05
-			"lng": -122.4194 + (rand.Float64()-0.5)*0.1,
-		}
-		broadcast <- Msg{Type: "map", Data: mapData}
+		/*
+			// Spectrum data: 20 random amplitudes
+			spectrumData := make([]float64, 20)
+			for i := range spectrumData {
+				spectrumData[i] = rand.Float64() * 50
+			}
+			broadcast <- Msg{Type: "spectrum", Data: spectrumData}
+
+			// Map data: random GPS point
+			mapData := map[string]float64{
+				"lat": 37.7749 + (rand.Float64()-0.5)*0.1, // SF area ±0.05
+				"lng": -122.4194 + (rand.Float64()-0.5)*0.1,
+			}
+			broadcast <- Msg{Type: "map", Data: mapData}
+		*/
 	}
 }
