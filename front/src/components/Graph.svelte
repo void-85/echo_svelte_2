@@ -6,23 +6,25 @@
   let unsubscribe;
   let canvas;
   let gl;
-  let program;
-  let buffer;
-  let width = 1000,
-    height = 300;
-  let valueBuffer;
-  let uMinLoc;
-  let uMaxLoc;
+  let width = 1024;
+  let height = 512;
 
-  let bufX;
-  let bufHeight;
-  let bufValue;
-  let locX;
-  let locHeight;
-  let locValue;
+  let texW;
+  let texH;
+  let texWF;
+  let rowIndex;
+  let progBars;
+  let bufBars;
+  let locPosBars;
+  let locValBars;
+  let locMinBars;
+  let locMaxBars;
 
-  let locPos
-  let locVal
+  let progWF;
+  let bufWF;
+  let locPosWF;
+  let locTexWF;
+  let locRowsWF;
 
   unsubscribe = socket.subscribe((ws) => {
     if (!ws) return;
@@ -44,8 +46,9 @@
   onMount(() => {
     setupWebGL();
   });
-
-  /*
+  // ------------------------------------------------------------------
+  // 1)  setupWebGL – create two programs, one texture, one quad buffer
+  // ------------------------------------------------------------------
   function setupWebGL() {
     gl = canvas.getContext("webgl");
     if (!gl) {
@@ -53,209 +56,191 @@
       return;
     }
 
-    // ------------- Vertex shader -------------
-    const vertexShaderSource = `
-      attribute vec2 a_position;   // x,y coordinates (-1…+1)
-      attribute float a_value;     // <-- NEW: the data[i] value you want to colour by
+    const compile = (type, src) => {
+      const sh = gl.createShader(type);
+      gl.shaderSource(sh, src);
+      gl.compileShader(sh);
+      if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS))
+        throw gl.getShaderInfoLog(sh);
+      return sh;
+    };
 
-      varying float vValue;        // <-- NEW: will be interpolated across the primitive
-
-      void main() {
-        gl_Position = vec4(a_position, 0.0, 1.0);
-        vValue = a_value;          // just forward the value
-      }
-    `;
-
-    // ------------- Fragment shader -------------
-    const fragmentShaderSource = `
-      precision mediump float;
-
-      varying float vValue;        // receives the interpolated value
-
-      // two helper uniforms so you can rescale the colour without recompiling shaders
-      uniform float uMinVal;
-      uniform float uMaxVal;
-
-      // a simple colour-map: low → blue, high → red
-      vec3 heatmap(float t) {
-        return mix(vec3(0.0, 0.0, 1.0),   // blue
-                  vec3(1.0, 0.0, 0.0),   // red
-                  t);
-      }
-
-      void main() {
-        float t = clamp((vValue - uMinVal) / (uMaxVal - uMinVal), 0.0, 1.0);
-        gl_FragColor = vec4(heatmap(t), 1.0);
-      }
-    `;
-
-    const vertexShader = compileShader(gl.VERTEX_SHADER, vertexShaderSource);
-    const fragmentShader = compileShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
-
-    program = gl.createProgram();
- 
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
-    gl.useProgram(program);
-
-    buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-
-    const a_position = gl.getAttribLocation(program, "a_position");
-    gl.enableVertexAttribArray(a_position);
-    gl.vertexAttribPointer(a_position, 2, gl.FLOAT, false, 0, 0);
-
-    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-    gl.clearColor(0.0, 0.2, 0.1, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-  }
-*/
-
-  function setupWebGL() {
-    gl = canvas.getContext("webgl");
-    if (!gl) {
-      alert("WebGL not supported");
-      return;
-    }
-
-    // Vertex shader: 2-D position + the value we colour by
-    const vs = `
-    attribute vec2 a_pos;   // (x,y) bottom-left / top-right corners
-    attribute float a_val;  // raw data value
-    varying   float vVal;
-
+    // ------------- bars program -------------
+    const vsBars = `
+    attribute vec2 a_pos;   // (x,y) in clip space
+    attribute float a_val;  // raw value for colouring
+    varying float vVal;
     void main() {
       gl_Position = vec4(a_pos, 0.0, 1.0);
       vVal = a_val;
-    }
-  `;
-
-    // Fragment shader: colour from value
-    const fs = `
+    }`;
+    const fsBars = `
     precision mediump float;
     varying float vVal;
-    uniform float uMinVal;
-    uniform float uMaxVal;
+    uniform float uMin;
+    uniform float uMax;
+    vec3 heat(float t){return mix(vec3(0.0,0.0,1.0),vec3(0.0,1.0,0.0),t);}
+    void main(){
+      float t = clamp((vVal-uMin)/(uMax-uMin),0.0,1.0);
+      t = pow(t, 2.5);
+      gl_FragColor = vec4(heat(t),1.0);
+    }`;
 
-    vec3 heat(float t) {
-      return mix(vec3(0.2, 0.2, 0.5), vec3(0.0, 1.0, 0.0), t);
-    }
+    progBars = gl.createProgram();
+    gl.attachShader(progBars, compile(gl.VERTEX_SHADER, vsBars));
+    gl.attachShader(progBars, compile(gl.FRAGMENT_SHADER, fsBars));
+    gl.linkProgram(progBars);
 
-    void main() {
-      float t = clamp((vVal - uMinVal) / (uMaxVal - uMinVal), 0.0, 1.0);
-      //float t = smoothstep(uMinVal, uMaxVal, vVal);
+    bufBars = gl.createBuffer();
+    locPosBars = gl.getAttribLocation(progBars, "a_pos");
+    locValBars = gl.getAttribLocation(progBars, "a_val");
+    locMinBars = gl.getUniformLocation(progBars, "uMin");
+    locMaxBars = gl.getUniformLocation(progBars, "uMax");
 
-      t = pow(t, 4.0);
+    // ------------- waterfall program -------------
+    const vsWF = `
+    attribute vec2 a_pos;
+    varying vec2 vUv;
+    void main(){
+      vUv = a_pos*0.5+0.5;   // (-1..+1) -> (0..1)
+      gl_Position = vec4(a_pos,0.0,1.0);
+    }`;
+    const fsWF = `
+    precision mediump float;
+    uniform sampler2D u_tex;
+    uniform float u_rows;
+    varying vec2 vUv;
+    void main(){
+      float row = (1.0 - vUv.y) * u_rows;
+      gl_FragColor = texture2D(u_tex, vec2(vUv.x, row/u_rows));
+    }`;
 
-      gl_FragColor = vec4(heat(t), 1.0);
-    }
-  `;
+    progWF = gl.createProgram();
+    gl.attachShader(progWF, compile(gl.VERTEX_SHADER, vsWF));
+    gl.attachShader(progWF, compile(gl.FRAGMENT_SHADER, fsWF));
+    gl.linkProgram(progWF);
 
-    const compile = (type, src) => {
-      const s = gl.createShader(type);
-      gl.shaderSource(s, src);
-      gl.compileShader(s);
-      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS))
-        throw gl.getShaderInfoLog(s);
-      return s;
-    };
+    bufWF = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufWF);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 1, -1, -1, 0, 1, 0]),
+      gl.STATIC_DRAW,
+    );
+    locPosWF = gl.getAttribLocation(progWF, "a_pos");
+    locTexWF = gl.getUniformLocation(progWF, "u_tex");
+    locRowsWF = gl.getUniformLocation(progWF, "u_rows");
 
-    const vsObj = compile(gl.VERTEX_SHADER, vs);
-    const fsObj = compile(gl.FRAGMENT_SHADER, fs);
+    // ------------- waterfall texture -------------
+    texW = 100;
+    texH = texW /2;
+    texWF = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texWF);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA,
+      texW,
+      texH,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      null,
+    );
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
-    program = gl.createProgram();
-    gl.attachShader(program, vsObj);
-    gl.attachShader(program, fsObj);
-    gl.linkProgram(program);
-    gl.useProgram(program);
-
-    // One interleaved buffer:  (x,y,value) * 6 vertices per bar
-    buffer = gl.createBuffer();
-
-    // Attribute & uniform locations
-    locPos = gl.getAttribLocation(program, "a_pos");
-    locVal = gl.getAttribLocation(program, "a_val");
-    uMinLoc = gl.getUniformLocation(program, "uMinVal");
-    uMaxLoc = gl.getUniformLocation(program, "uMaxVal");
-
-    gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
-    gl.clearColor(0.1, 0.1, 0.0, 1.0);
+    rowIndex = 0; // next row to write
+    gl.clearColor(0.0,0.2,0.1,1.0)
   }
 
-  /*function drawGraph() {
-    if (!gl || !data.length) return;
-
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-    // Normalize data into [-1, 1] WebGL clip space
-    const xScale = 2 / (data.length - 1);
-    const minY = Math.min(...data);
-    const maxY = Math.max(...data);
-    const yScale = 2 / (maxY - minY || 1);
-
-    const vertices = [];
-    data.forEach((d, i) => {
-      const x = -1 + i * xScale; // from -1 to +1
-      const y = -1 + (d - minY) * yScale; // normalize to -1..+1
-      vertices.push(x, y);
-    });
-
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-
-    gl.drawArrays(gl.LINE_STRIP, 0, data.length);
-  }*/
-
+  // ------------------------------------------------------------------
+  // 2)  drawGraph – bars on top, proper waterfall below
+  // ------------------------------------------------------------------
   function drawGraph() {
     if (!gl || !data.length) return;
 
     gl.clear(gl.COLOR_BUFFER_BIT);
 
     const N = data.length;
-    const minVal = Math.min(...data);
-    const maxVal = Math.max(...data);
-    const range = maxVal - minVal || 1;
+    const minV = Math.min(...data);
+    const maxV = Math.max(...data);
+    const range = maxV - minV || 1;
+    const barW = (2 / N) * 0.9;
 
-    // pixel width of one bar in clip space (constant bar width)
-    const barW = (2 / N) * 0.9; // 0.9 => thin gap between bars
-
-    // Build one interleaved array:  (x,y,value) for each vertex
-    // Two triangles per bar = 6 vertices
-    const verts = new Float32Array(N * 6 * 3); // 6 verts * 3 floats (x,y,val)
-
+    // ------------- 1) Bars (top half y = 0 … 1) -------------
+    const barVerts = new Float32Array(N * 6 * 3); // 6 verts * (x,y,val)
     data.forEach((v, i) => {
-      const x0 = -1 + i * (2 / N); // left
-      const x1 = x0 + barW; // right
-      const y0 = -1; // bottom (value 0)
-      const y1 = -1 + ((v - minVal) / range) * 2; // top (scaled to NDC)
-
-      const idx = i * 18; // 6 verts * 3 floats
-      // Triangle 1
-      verts.set([x0, y0, v, x1, y0, v, x0, y1, v], idx);
-      // Triangle 2
-      verts.set([x1, y0, v, x1, y1, v, x0, y1, v], idx + 9);
+      const x0 = -1 + i * (2 / N);
+      const x1 = x0 + barW;
+      const y0 = 0.0; // bottom of bars
+      const y1 = (v - minV) / range; // top of bars
+      const idx = i * 18;
+      barVerts.set([x0, y0, v, x1, y0, v, x0, y1, v], idx);
+      barVerts.set([x1, y0, v, x1, y1, v, x0, y1, v], idx + 9);
     });
 
-    // Upload
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STREAM_DRAW);
+    gl.useProgram(progBars);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufBars);
+    gl.bufferData(gl.ARRAY_BUFFER, barVerts, gl.STREAM_DRAW);
 
-    // Tell WebGL how to read the buffer:
-    //   stride = 3 * 4 = 12 bytes, offset = 0 for pos, 8 for value
-    gl.enableVertexAttribArray(locPos);
-    gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, 12, 0);
+    gl.enableVertexAttribArray(locPosBars);
+    gl.vertexAttribPointer(locPosBars, 2, gl.FLOAT, false, 12, 0);
+    gl.enableVertexAttribArray(locValBars);
+    gl.vertexAttribPointer(locValBars, 1, gl.FLOAT, false, 12, 8);
 
-    gl.enableVertexAttribArray(locVal);
-    gl.vertexAttribPointer(locVal, 1, gl.FLOAT, false, 12, 8);
-
-    // Colour scale
-    gl.uniform1f(uMinLoc, minVal);
-    gl.uniform1f(uMaxLoc, maxVal);
-
-    // Draw
+    gl.uniform1f(locMinBars, minV);
+    gl.uniform1f(locMaxBars, maxV);
     gl.drawArrays(gl.TRIANGLES, 0, N * 6);
+
+    // ------------- 2) Waterfall (bottom half y = -1 … 0) -------------
+    // scroll: move entire texture one pixel down
+    gl.bindTexture(gl.TEXTURE_2D, texWF);
+    gl.copyTexSubImage2D(
+      gl.TEXTURE_2D,
+      0,
+      0,
+      1, // dst x, y
+      0,
+      0, // src x, y
+      100,
+      50,
+    );
+
+    // write newest row at top
+    const row = new Uint8Array(texW * 4);
+    data.forEach((v, i) => {
+      const t = Math.max(0, Math.min(1, (v - minV) / range));
+      const r = 0;
+      const g = Math.round(255 * t);
+      
+      const b = Math.round(255 * (1 - t));
+      row.set([r, g, b, 255], i * 4);
+    });
+    gl.texSubImage2D(
+      gl.TEXTURE_2D,
+      0,
+      0,
+      rowIndex,
+      data.length,
+      1,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      row,
+    );
+    rowIndex = (rowIndex + 1) % texH;
+
+    // draw full-screen quad, but only bottom half is visible
+    gl.useProgram(progWF);
+    gl.bindBuffer(gl.ARRAY_BUFFER, bufWF);
+    gl.enableVertexAttribArray(locPosWF);
+    gl.vertexAttribPointer(locPosWF, 2, gl.FLOAT, false, 0, 0);
+    gl.bindTexture(gl.TEXTURE_2D, texWF);
+    gl.uniform1i(locTexWF, 0);
+    gl.uniform1f(locRowsWF, texH);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 </script>
 
